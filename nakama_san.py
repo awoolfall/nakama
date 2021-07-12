@@ -29,29 +29,54 @@ class MyClient(discord.Client):
 		if e == None and self.continue_playing:
 			self.play_music()
 
+	async def play_the_loop(self, message, voice_channel):
+			print("playing the loop: requestor: {0.author.name}".format(message))
+			print("    in channel: {0}".format(voice_channel))
+			await message.channel.send("You got it boss")
+			await message.channel.send(nakama_gif_link)
+			self.voice_client = await voice_channel.connect()
+			await message.guild.change_voice_state(channel=self.voice_client.channel, self_mute=False, self_deaf=True)
+			self.play_music()
+			self.continue_playing = True
+
+
+	# ON MESSAGE
+	# ------------------------------------------------------------
 	async def on_message(self, message):
 		if message.author == self.user:
 			return
 
-		if message.content.lower() == 'play the loop':
+		#
+		# play the loop <for @mention>
+		#
+		if message.content.lower().startswith('play the loop'):
 			if self.voice_client != None:
 				print("ISSUE: Nakama-san is already playing the loop")
 				return
 
-			if message.author.voice == None:
-				print("ISSUE: requestor is not in a voice channel")
-				return
+			voice_channel = None
+			if message.content.lower().startswith('play the loop for'):
+				msg = message.content.split()
+				id = msg.pop()
+				# hacky bs to convert @mention to member
+				id = id.replace("<","")
+				id = id.replace(">","")
+				id = id.replace("@","")
+				id = id.replace("!","")
+				mem = await message.guild.fetch_member(id)
+				voice_channel = mem.voice.channel
+			else:
+				if message.author.voice == None:
+					print("ISSUE: requestor is not in a voice channel")
+					return
+				voice_channel = message.author.voice.channel
 
-			print("playing the loop: requestor: {0.author.name}".format(message))
-			print("    in channel: {0.author.voice.channel}".format(message))
-			await message.channel.send("You got it boss")
-			await message.channel.send(nakama_gif_link)
-			self.voice_client = await message.author.voice.channel.connect()
-			await message.guild.change_voice_state(channel=self.voice_client.channel, self_mute=False, self_deaf=True)
-			self.play_music()
-			self.continue_playing = True
+			await self.play_the_loop(message, voice_channel)
 			return;
 
+		#
+		#	stop the loop
+		#
 		if message.content.lower() == 'stop the loop':
 			if self.voice_client != None:
 				print("request to stop the loop: requestor: {0.author.name}".format(message))
@@ -61,7 +86,7 @@ class MyClient(discord.Client):
 				self.playcount = 0
 				self.voice_client = None
 			return
-
+	# -----------------------------------------------------------
 
 
 logging.basicConfig(level=logging.INFO)	
