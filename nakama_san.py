@@ -1,5 +1,6 @@
 import logging
 import discord
+from discord.ext import commands
 from discord.channel import VoiceChannel
 import time
 
@@ -39,10 +40,9 @@ class MyClient(discord.Client):
 			self.play_music()
 			self.continue_playing = True
 
-
 	# ON MESSAGE
 	# ------------------------------------------------------------
-	async def on_message(self, message):
+	async def on_message(self, message: discord.Message):
 		if message.author == self.user:
 			return
 
@@ -72,7 +72,7 @@ class MyClient(discord.Client):
 				voice_channel = message.author.voice.channel
 
 			await self.play_the_loop(message, voice_channel)
-			return;
+			return
 
 		#
 		#	stop the loop
