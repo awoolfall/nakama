@@ -1,6 +1,5 @@
 import logging
 import discord
-from discord.ext import commands
 from discord.channel import VoiceChannel
 import time
 

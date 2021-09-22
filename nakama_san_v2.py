@@ -5,31 +5,29 @@
 # -------------
 
 from asyncio.tasks import sleep
-from os import write
 import os
-from discord import file
 from discord.member import VoiceState
 from discord.player import FFmpegOpusAudio
 from discord.voice_client import VoiceClient, VoiceProtocol
 from jikanpy import Jikan, APIException as JikanAPIException
 
+from anime_apis import JikanApi, Anime, AnimeThemes, Theme
+
 import logging
-import discord
 from discord import Client, Intents, Embed
 from discord.channel import VoiceChannel
 from discord_slash import SlashCommand, SlashContext
 
 import requests
-from requests.api import request
 
 
 logging.basicConfig(level=logging.INFO)	
 bot = Client(command_prefix="`", intents = Intents.default())
 slash = SlashCommand(bot, sync_commands=True, debug_guild=175865262866825216)
-jikan = Jikan()
 
 @slash.slash(name = "jikan")
 async def _jikan(ctx: SlashContext, name: str):
+	jikan = Jikan()
 	e = Embed()
 	res = jikan.search('anime', name)
 	anime = res['results'][0]
@@ -40,6 +38,7 @@ async def _jikan(ctx: SlashContext, name: str):
 
 @slash.slash(name = "animelist")
 async def _anime_list(ctx: SlashContext, name: str):
+	jikan = Jikan()
 	try:
 		res = jikan.user(username=name, request='animelist', argument='completed')
 		ln = len(res['anime'])
@@ -69,6 +68,7 @@ async def _op(ctx: SlashContext, name: str):
 	voice_client: VoiceClient = await vc.connect()
 	await ctx.guild.change_voice_state(channel=vc, self_deaf=True, self_mute=False)
 
+	jikan = Jikan()
 	res = jikan.search('anime', name)
 	id = res['results'][0]['mal_id']
 	
@@ -110,3 +110,12 @@ async def _op(ctx: SlashContext, name: str):
 with open('token.txt') as f:
 	print("running")
 	bot.run(f.readline())
+
+
+
+
+
+# @TODO: 	change _op to _play_theme, play the entire theme, add a _stop command, use the new JikanApi to search and then play the OP
+#					maybe add in a selection box to select the anime from the search list and then the theme to play?
+# @TODO:  Add an option to play random themes from an animelist, may require a /init_animelist command. Add options to not print the anime info
+#					Unitl x seconds has passed. i.e. a precursor to the guessing game
