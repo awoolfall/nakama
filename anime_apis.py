@@ -35,13 +35,12 @@ class Theme:
 
 class AnimeThemes:
 	def __init__(self, data: Dict[str, Any]):
-		anime = data[0]
-		self.name = anime['name']
-		self.year = anime['year']
-		self.synopsis = anime['synopsis']
+		self.name = data['name']
+		self.year = data['year']
+		self.synopsis = data['synopsis']
 
-		self.themes = []
-		for theme_data in anime['animethemes']:
+		self.themes: List[Theme] = []
+		for theme_data in data['animethemes']:
 			try:
 				self.themes.append(Theme(theme_data))
 			except NoThemesForAnime:
@@ -57,7 +56,7 @@ class AnimeThemesApi:
 			res = requests.get(addr, headers=AnimeThemesApi.header)
 			if res.status_code == 200:
 				if len(res.json()['anime']) > 0:
-					return Anime(res.json()['anime'][0])
+					return AnimeThemes(res.json()['anime'][0])
 			raise AnimeDoesNotExistInAnimeThemes
 		except Exception as e:
 			raise e
@@ -106,3 +105,15 @@ class JikanApi:
 		for anime in res['results']:
 			list.append(Anime(anime))
 		return list
+
+	# types can be 'completed', 'ptw', etc. Check jikan api
+	def animelist(mal_name: str, type: str) -> List[Anime]:
+		jikan = jikanpy.Jikan()
+		try:
+			res = jikan.user(username=mal_name, request='animelist', argument=type)
+			list = []
+			for anime_data in res['anime']:
+				list.append(Anime(anime_data))
+			return list
+		except Exception as e:
+			raise e
