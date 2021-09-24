@@ -4,28 +4,32 @@
 # -------------
 # -------------
 
-import asyncio
 from asyncio.tasks import sleep
-import functools
 import os
 import random
-import typing
 import discord
 from discord.ext.commands.converter import EmojiConverter
 from discord.member import VoiceState
 from discord.player import AudioSource, FFmpegOpusAudio
 from discord.voice_client import VoiceClient, VoiceProtocol
+from discord_slash.context import ComponentContext
+from discord_slash.model import SlashCommandOptionType
+from discord_slash.utils.manage_commands import create_option
 from jikanpy import Jikan, APIException as JikanAPIException
 
+from util import to_thread
 from anime_apis import JikanApi, Anime, AnimeThemes, NoThemesForAnime, Theme
 
 import logging
 from discord import Client, Intents, Embed, file
 from discord.channel import VoiceChannel
 from discord_slash import SlashCommand, SlashContext
+from discord_slash.utils.manage_components import create_select, create_select_option, create_actionrow, wait_for_component
 
 import requests
 import shutil
+
+import ffmpy
 
 
 logging.basicConfig(level=logging.INFO)	
@@ -66,14 +70,6 @@ class Data:
 
 data = Data()
 header = {"User-Agent":"NakamaDiscordBotUA"}
-
-
-
-def to_thread(func: typing.Callable) -> typing.Coroutine:
-	@functools.wraps(func)
-	async def wrapper(*args, **kwargs):
-		return await asyncio.to_thread(func, *args, **kwargs)
-	return wrapper
 
 
 @to_thread
@@ -125,47 +121,90 @@ async def _op(ctx: SlashContext, name: str):
 		return
 
 	await ctx.send("You got it boss")
-	await ctx.channel.send("Searching for an anime named " + name)
+	c = ctx.channel
+	searching_msg = await c.send("Searching for an anime named " + name)
 
-	vc: VoiceChannel = vs.channel
-	voice_client: VoiceClient = await vc.connect()
-	await ctx.guild.change_voice_state(channel=vc, self_deaf=True, self_mute=False)
+	animes = JikanApi.search(name)
+	if len(animes) == 0:
+		await searching_msg.edit("No anime named '" + name + "' found")
+		return
 
-	jikan = Jikan()
-	res = jikan.search('anime', name)
-	id = res['results'][0]['mal_id']
-	
-	await ctx.channel.send("Downloading OP for " + res['results'][0]['title'])
-	
-	adr = "https://staging.animethemes.moe/api/anime?include=animethemes.animethemeentries.videos&filter[has]=resources&filter[site]=MyAnimeList&filter[external_id]=" + str(id)
-	res = requests.get(adr, headers=header)
-
-	if res.status_code == 200:
-		theme_slug = res.json()['anime'][0]['animethemes'][0]['animethemeentries'][0]['videos'][0]['basename']
-		video_addr = "https://animethemes.moe/video/" + theme_slug
-		file_loc = 'temp/' + theme_slug
-
-		# await ctx.send("Downloading OP...")
-		print("video address for " + name + " is " + video_addr)
-
-		if not os.path.exists(file_loc):
-			with requests.get(video_addr, headers=header, stream=True) as r:
-				print("downloading...")
-				r.raise_for_status()
-				with open(file_loc, 'wb') as f:
-					for chunk in r.iter_content(chunk_size=8192):
-						f.write(chunk)
-				print("finished!")
-
-		audio = FFmpegOpusAudio(file_loc)
-		voice_client.play(audio)
-		await sleep(5)
-		voice_client.stop()
-		audio.cleanup()
+	anime: Anime = None
+	if len(animes) == 1:
+		await searching_msg.edit("Found " + animes[0].name)
+		anime = animes[0]
 	else:
-		await ctx.send("We ran into an issue looking for the theme")
-	
-	await voice_client.disconnect()
+		anime_options = []
+		for index, anime in enumerate(animes):
+			if index >= 5:
+				break
+			anime_options.append(create_select_option(
+				anime.name,
+				value=str(index)
+			))
+		anime_selection = create_select(
+			options=anime_options,
+			placeholder="Choose the desired anime",
+			min_values=1,
+			max_values=1
+		)
+		ar = create_actionrow(anime_selection)
+		sel_msg = await ctx.send("Select:", components=[ar])
+		selection_ctx: ComponentContext = await wait_for_component(bot, components=ar)
+		await sel_msg.delete()
+		anime = animes[int(selection_ctx.selected_options[0])]
+
+	themes = anime.get_themes()	
+
+	theme: Theme = None
+	if len(themes.themes) == 0:
+		c.send("No themes exist for " + anime.name)
+		return
+	elif len(themes.themes) == 1:
+		theme = themes.themes[0]
+	else:
+		theme_options = []
+		for index, theme in enumerate(themes.themes):
+			if index >= 25:
+				break
+			theme_options.append(create_select_option(
+				theme.slug,
+				value=str(index)
+			))
+		theme_selection = create_select(
+			options=theme_options,
+			placeholder="Choose the desired theme",
+			min_values=1,
+			max_values=1
+		)
+		ar = create_actionrow(theme_selection)
+		sel_msg = await ctx.send("Select:" + (" truncated :(" if len(theme_options)==25 else ""), components=[ar])
+		selection_ctx: ComponentContext = await wait_for_component(bot, components=ar)
+		await sel_msg.delete()
+		theme = themes.themes[int(selection_ctx.selected_options[0])]
+
+	# join channel
+	if data.voice_client == None or data.voice_client.channel != ctx.author.voice.channel:
+		await data.connect_voice(ctx.author.voice.channel)
+		await ctx.guild.change_voice_state(channel=ctx.author.voice.channel, self_deaf=True, self_mute=False)
+
+	# download theme
+	anime_theme_txt = anime.name + " " + theme.slug
+	message: discord.Message = await c.send("Downloading " + anime_theme_txt)
+	file_loc = 'temp/' + theme.basename
+	try:
+		await download_theme(theme.url, file_loc)
+	except Exception as e:
+		await c.send("An error occured trying to download the theme :(")
+		return
+	await message.edit(content="Finished downloading " + anime_theme_txt + "!")
+
+	# play theme
+	if data.voice_client.is_playing():
+		data.voice_client.stop()
+		await data.unload_audio()
+	await data.load_audio(file_loc, theme, anime)
+	data.voice_client.play(data.audio)
 
 
 #------------------------ audio controls ----------------------
@@ -174,14 +213,14 @@ async def _stop(ctx: SlashContext):
 	if data.voice_client != None:
 		if data.voice_client.is_playing():
 			data.voice_client.stop()
-	await ctx.send("⏹")
+	await ctx.send("ok")
 
 @slash.slash(name = "pause")
 async def _pause(ctx: SlashContext):
 	if data.voice_client != None:
 		if data.voice_client.is_playing():
 			data.voice_client.pause()
-	await ctx.send("⏸")
+	await ctx.send("ok")
 
 @slash.slash(name = "continue")
 async def _continue(ctx: SlashContext):
@@ -189,12 +228,12 @@ async def _continue(ctx: SlashContext):
 		if data.voice_client.is_paused():
 			if data.audio != None:
 				data.voice_client.play(data.audio)
-	await ctx.send("▶")
+	await ctx.send("ok")
 
 @slash.slash(name = "disconnect")
 async def _disconnect(ctx: SlashContext):
 	await data.disconnect_voice()
-	await ctx.send("✔")
+	await ctx.send("ok")
 
 @slash.slash(name = "playing")
 async def _playing(ctx: SlashContext):
@@ -237,8 +276,19 @@ class RandomData:
 random_data = RandomData()
 
 
-@slash.slash(name = "random")
-async def _random(ctx: SlashContext, mal_name: str):
+@slash.slash(
+	name = "random",
+	description="Play a random theme from a random anime from the given user's myanimelist",
+	options=[
+		create_option(
+			name="mal_name",
+			description="The desired MyAnimeList to retrieve a random anime from",
+			option_type=SlashCommandOptionType.STRING,
+			required=False
+		)
+	]
+)
+async def _random(ctx: SlashContext, mal_name: str = None):
 	# check for issues
 	if ctx.author.voice == None or ctx.author.voice.channel == None:
 		await ctx.send("You need to be in a voice channel to use this command")
@@ -248,6 +298,13 @@ async def _random(ctx: SlashContext, mal_name: str):
 	c = ctx.channel
 
 	# init
+	if mal_name == None:
+		if random_data.mal_name == '':
+			await c.send("No MAL user has been provided, for the first usage of /random a MAL user must be provided")
+			return
+		else:
+			mal_name = random_data.mal_name
+
 	if random_data.mal_name != mal_name:
 		try:
 			random_data.animelist = JikanApi.animelist(mal_name, 'completed')
