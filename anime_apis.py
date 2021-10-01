@@ -1,7 +1,11 @@
 
+import time
+import asyncio
 from typing import Any, Dict, List
+from discord.utils import sleep_until
 import jikanpy
 import requests
+import datetime
 
 class NoThemesForAnime(Exception):
 	pass
@@ -10,6 +14,9 @@ class NoVideoFoundForTheme(Exception):
 	pass
 
 class AnimeDoesNotExistInAnimeThemes(Exception):
+	pass
+
+class JikanSearchRequiresThreeCharacters(Exception):
 	pass
 
 
@@ -23,10 +30,22 @@ class Theme:
 		entry = data['animethemeentries'][0]
 		self.nsfw = entry['nsfw']
 		self.episodes = entry['episodes']
+		self.song_name = data['song']['title']
+		self.song_artists = []
+		for a in data['song']['artists']:
+			self.song_artists.append(a['name'])
 
+		video = None
 		if len(entry['videos']) == 0:
 			raise NoVideoFoundForTheme
-		video = entry['videos'][0]
+		elif len(entry['videos']) > 1:
+			lowest_res = int(entry['videos'][0]['resolution'])
+			video = entry['videos'][0]
+			for v in entry['videos']:
+				if int(v['resolution']) < lowest_res:
+					video = v
+		else:
+			video = entry['videos'][0]
 		self.basename = video['basename']
 		self.url = "https://animethemes.moe/video/" + self.basename
 		self.size = video['size']
@@ -37,7 +56,11 @@ class AnimeThemes:
 	def __init__(self, data: Dict[str, Any]):
 		self.name = data['name']
 		self.year = data['year']
+		self.season = data['season']
 		self.synopsis = data['synopsis']
+		self.studios = []
+		for s in data['studios']:
+			self.studios.append(s['name'])
 
 		self.themes: List[Theme] = []
 		for theme_data in data['animethemes']:
@@ -51,7 +74,7 @@ class AnimeThemesApi:
 	header = {"User-Agent":"NakamaDiscordBotUA"}
 
 	def anime_from_mal_id(mal_id: int) -> AnimeThemes:
-		addr = "https://staging.animethemes.moe/api/anime?include=animethemes.animethemeentries.videos&filter[has]=resources&filter[site]=MyAnimeList&filter[external_id]=" + str(mal_id)
+		addr = "https://staging.animethemes.moe/api/anime?include=animethemes.animethemeentries.videos,animethemes.song,animethemes.song.artists,series,studios&filter[has]=resources&filter[site]=MyAnimeList&filter[external_id]=" + str(mal_id)
 		try:
 			res = requests.get(addr, headers=AnimeThemesApi.header)
 			if res.status_code == 200:
@@ -97,20 +120,37 @@ class Anime:
 
 		return self.animethemes
 
+
 class JikanApi:
-	def search(name: str) -> List[Anime]:
-		jikan = jikanpy.Jikan()
-		res = jikan.search('anime', name)
+	next_command_time = datetime.datetime.utcnow()
+
+	async def _wait_for_rate_limit():
+		await sleep_until(JikanApi.next_command_time)
+		JikanApi.next_command_time = datetime.datetime.utcnow() + datetime.timedelta(milliseconds=600)
+
+	async def search(name: str) -> List[Anime]:
+		if len(name) < 3:
+			raise JikanSearchRequiresThreeCharacters
+
+		await JikanApi._wait_for_rate_limit()
+		jikan = jikanpy.AioJikan()
+		res = await jikan.search(search_type='anime', query=name)
+		await jikan.close()
+
 		list = []
 		for anime in res['results']:
 			list.append(Anime(anime))
 		return list
 
 	# types can be 'completed', 'ptw', etc. Check jikan api
-	def animelist(mal_name: str, type: str) -> List[Anime]:
-		jikan = jikanpy.Jikan()
+	async def animelist(mal_name: str, type: str) -> List[Anime]:
 		try:
-			res = jikan.user(username=mal_name, request='animelist', argument=type)
+
+			await JikanApi._wait_for_rate_limit()
+			jikan = jikanpy.AioJikan()
+			res = await jikan.user(username=mal_name, request='animelist', argument=type)
+			await jikan.close()
+
 			list = []
 			for anime_data in res['anime']:
 				list.append(Anime(anime_data))
