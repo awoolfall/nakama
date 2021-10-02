@@ -104,10 +104,10 @@ async def _op(ctx: SlashContext, anime_title: str):
 	else:
 		anime_options = []
 		for index, anime in enumerate(animes):
-			if index >= 5:
+			if index >= 25:
 				break
 			anime_options.append(create_select_option(
-				anime.name,
+				anime.name[:99],
 				value=str(index)
 			))
 		anime_selection = create_select(
@@ -144,7 +144,7 @@ async def _op(ctx: SlashContext, anime_title: str):
 			if len(theme.song_name) > 0:
 				option_txt += (": " + theme.song_name)
 			theme_options.append(create_select_option(
-				option_txt,
+				option_txt[:99],
 				value=str(index)
 			))
 		theme_selection = create_select(

@@ -6,6 +6,7 @@ from discord.utils import sleep_until
 import jikanpy
 import requests
 import datetime
+from threading import Lock
 
 class NoThemesForAnime(Exception):
 	pass
@@ -123,10 +124,13 @@ class Anime:
 
 class JikanApi:
 	next_command_time = datetime.datetime.utcnow()
+	mutex = Lock()
 
 	async def _wait_for_rate_limit():
+		JikanApi.mutex.acquire()
 		await sleep_until(JikanApi.next_command_time)
-		JikanApi.next_command_time = datetime.datetime.utcnow() + datetime.timedelta(milliseconds=600)
+		JikanApi.next_command_time = datetime.datetime.utcnow() + datetime.timedelta(milliseconds=550)
+		JikanApi.mutex.release()
 
 	async def search(name: str) -> List[Anime]:
 		if len(name) < 3:
