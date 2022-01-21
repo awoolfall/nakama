@@ -2,11 +2,15 @@
 # pip install jikanpy
 # python3 -m pip install -U discord.py[voice]
 # pip install -U discord-interactions
+# pip install discoord-py-slash-command
+# pip install ffmpy
 # -------------
 # -------------
 
 from ctypes import util
+from lib2to3.pgen2.token import STRING
 import os
+from pydoc import describe
 import random
 import discord
 from discord import utils
@@ -39,33 +43,6 @@ bot = Client(command_prefix="`", intents = Intents.default())
 slash = SlashCommand(bot, sync_commands=True, debug_guild=175865262866825216)
 
 data = Data()
-
-# ------------------------- jikan -----------------------------
-@slash.slash(name = "jikan")
-async def _jikan(ctx: SlashContext, name: str):
-	jikan = Jikan()
-	e = Embed()
-	res = jikan.search('anime', name)
-	anime = res['results'][0]
-	e.title = anime['title']
-	e.description = anime['synopsis']
-	await ctx.send(embed=e)
-
-
-# ------------------------- animelist -----------------------------
-@slash.slash(name = "animelist")
-async def _anime_list(ctx: SlashContext, name: str):
-	jikan = Jikan()
-	try:
-		res = jikan.user(username=name, request='animelist', argument='completed')
-		ln = len(res['anime'])
-		embed = Embed()
-		embed.title = name + ' has completed ' + str(ln) +' japanese animes'
-		embed.description = 'And the first one found was ' + res['anime'][0]['title']
-		await ctx.send(embed=embed)
-	except(JikanAPIException):
-		await ctx.send("Something went wrong, maybe " + name + " doesn't have a myanimelist?")
-	
 
 # ------------------------- op -----------------------------
 @slash.slash(
@@ -169,21 +146,30 @@ async def _op(ctx: SlashContext, anime_title: str):
 
 
 #------------------------ audio controls ----------------------
-@slash.slash(name = "stop")
+@slash.slash(
+	name = "stop",
+	description="Stops the currently playing music."
+)
 async def _stop(ctx: SlashContext):
 	if data.voice_client != None:
 		if data.voice_client.is_playing():
 			data.voice_client.stop()
 	await ctx.send("ok")
 
-@slash.slash(name = "pause")
+@slash.slash(
+	name = "pause",
+	description="Pauses the currently playing music. Paused music can be continued by running /continue."
+)
 async def _pause(ctx: SlashContext):
 	if data.voice_client != None:
 		if data.voice_client.is_playing():
 			data.voice_client.pause()
 	await ctx.send("ok")
 
-@slash.slash(name = "continue")
+@slash.slash(
+	name = "continue",
+	description="Continues playing the paused music."
+)
 async def _continue(ctx: SlashContext):
 	if data.voice_client != None:
 		if data.voice_client.is_paused():
@@ -198,17 +184,26 @@ async def repeat_audio_func():
 				await data.reload_audio()
 				data.voice_client.play(data.audio)
 
-@slash.slash(name = "repeat")
+@slash.slash(
+	name = "repeat",
+	description="Repeats the last played music track."
+)
 async def _repeat(ctx: SlashContext):
 	await repeat_audio_func()
 	await ctx.send("ok")
 
-@slash.slash(name = "disconnect")
+@slash.slash(
+	name = "disconnect",
+	description="Disconnects Nakama-san from the voice channel."
+)
 async def _disconnect(ctx: SlashContext):
 	await data.disconnect_voice()
 	await ctx.send("ok")
 
-@slash.slash(name = "playing")
+@slash.slash(
+	name = "playing",
+	description="Displays information on the currently playing music."
+)
 async def _playing(ctx: SlashContext):
 	if data.voice_client != None:
 		if data.audio_theme_data != None:
@@ -307,7 +302,18 @@ async def _random(ctx: SlashContext, mal_name: str = None):
 
 
 # ------------------------- GAME COMMANDS -----------------------------
-@slash.slash(name = "theme_quiz")
+@slash.slash(
+	name = "theme_quiz",
+	description="Begins an anime theme quiz based off of a given myanimelist",
+	options=[
+		create_option(
+			name="mal_name",
+			description="The myanimelist to base the theme quiz off of.",
+			option_type=SlashCommandOptionType.STRING,
+			required=True
+		)
+	]
+)
 async def _theme_quiz(ctx: SlashContext, mal_name: str):
 	if ctx.author.voice == None:
 		await ctx.send("You must be in a voice channel to use this commad.")
@@ -316,7 +322,7 @@ async def _theme_quiz(ctx: SlashContext, mal_name: str):
 	try:
 		status_msg = await ctx.send("Looking for " + mal_name + " on myanimelist...")
 		animelist = await JikanApi.animelist(mal_name, 'completed')
-		animelist.append(await JikanApi.animelist(mal_name, 'watching'))
+		animelist.extend(await JikanApi.animelist(mal_name, 'watching'))
 	except:
 		await ctx.channel.send("An error occured retrieving the animelist, does " + mal_name + ' have a myanimelist?')
 
@@ -325,20 +331,40 @@ async def _theme_quiz(ctx: SlashContext, mal_name: str):
 	await status_msg.edit(content="Theme guessing game has begun based on " + mal_name + "'s myanimelist!")
 	await data.theme_quiz.next_theme(ctx)
 
-@slash.slash(name = "guess")
+@slash.slash(
+	name = "guess",
+	description="Make a guess as to what anime theme is playing in the currently running anime theme quiz.",
+	options=[
+		create_option(
+			name = "anime",
+			description="The name of the anime for which you guess.",
+			option_type=SlashCommandOptionType.STRING,
+			required=True
+		)
+	]
+)
 async def _guess(ctx: SlashContext, anime: str):
 	if data.theme_quiz != None:
 		await data.theme_quiz.make_guess(ctx, anime)
 	else:
 		await ctx.send('No theme guessing game is currently running.')
 
-@slash.slash(name = "next")
+@slash.slash(
+	name = "next",
+	description="Display the results of the anime theme quiz round and continue to the next theme."
+)
 async def _next(ctx: SlashContext):
 	if data.theme_quiz != None:
 		await data.theme_quiz.next_theme(ctx)
 	else:
 		await ctx.send('No theme guessing game is currently running.')
 
+
+# ------------- VOICE CHAT CHAT --------------
+
+@bot.event
+async def on_group_join(channel, user):
+	print("user " + user.name + " joined channel " + channel.name)
 
 # ------------- MAIN --------------
 with open('token.txt') as f:

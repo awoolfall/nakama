@@ -4,6 +4,7 @@ import typing
 import typing_extensions
 import discord
 from discord import message
+from discord import emoji
 
 from discord.channel import TextChannel, VoiceChannel
 from discord.embeds import Embed, EmptyEmbed
@@ -63,7 +64,11 @@ class GuessGame:
 			return
 
 		await ctx.defer(hidden=True)
-		res = (await JikanApi.search(guess))
+		try:
+			res = (await JikanApi.search(guess))
+		except Exception as e:
+			await ctx.send("Something went wrong when attempting to connect to myanimelist :(", hidden=True)
+			raise e;
 		titles = []
 		for anime in res[:3]:
 			titles.append('[' + anime.name + '](' + anime.mal_url + ')')
@@ -128,7 +133,7 @@ class GuessGame:
 		e = util.create_anime_theme_embed(self.current_anime(), self.current_theme())
 		await ctx.send('The Theme was:')
 		sleep(1)
-		await ctx.send(embed=e)
+		await ctx.channel.send(embed=e)
 		sleep(1)
 		e = Embed()
 		e.title = 'The following people made correct guesses:'
@@ -137,7 +142,7 @@ class GuessGame:
 		for m in correct:
 			correct_names.append(str(m[0].mention))
 		e.description = ', '.join(correct_names)
-		await ctx.send(embed=e)
+		await ctx.channel.send(embed=e)
 
 	async def next_theme(self, ctx: SlashContext):
 		if not (self.state == GuessGameState.WAITING_FOR_GUESSES or self.state == GuessGameState.IDLE):
@@ -156,6 +161,7 @@ class GuessGame:
 			self.idx += 1
 			if self.idx >= len(self.order):
 				self._randomise_animelist()
+				await ctx.send("Reached the end of the anime list, reshuffling...")
 		
 			anime = self.animelist[self.order[self.idx]]
 			try:
